@@ -1,0 +1,38 @@
+{
+  "name": "aurora-reliability-platform",
+  "version": "0.1.0",
+  "description": "AURORA - Next-Generation Cloud Reliability, SLO Management, and Resilience Testing Platform",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "services/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "dev:engine": "npm run dev --workspace=services/engine",
+    "dev:dashboard": "npm run dev --workspace=apps/dashboard"
+  },
+  "keywords": [
+    "aurora",
+    "reliability-engineering",
+    "sre",
+    "slo",
+    "sli",
+    "error-budgets",
+    "chaos-engineering",
+    "observability",
+    "synthetic-monitoring"
+  ],
+  "author": "AURORA Reliability Engineering Team",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2"
+  }
+}

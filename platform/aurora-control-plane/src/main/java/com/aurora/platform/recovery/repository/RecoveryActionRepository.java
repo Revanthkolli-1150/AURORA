@@ -1,0 +1,14 @@
+package com.aurora.platform.recovery.repository;
+
+import com.aurora.platform.recovery.entity.RecoveryActionEntity;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.List;
+import java.util.UUID;
+
+@Repository
+public interface RecoveryActionRepository extends JpaRepository<RecoveryActionEntity, UUID> {
+
+    List<RecoveryActionEntity> findByRecoveryPlanId(UUID recoveryPlanId);
+}

@@ -1,0 +1,16 @@
+{
+  "name": "@aurora/recovery-service",
+  "version": "0.1.0",
+  "description": "AURORA Self-Healing, Chaos Mitigation & Automated Rollback Service",
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "test": "tsc && node --test dist/*.test.js",
+    "dev": "node --watch src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@aurora/types": "*"
+  }
+}

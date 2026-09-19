@@ -1,0 +1,18 @@
+apiVersion: aurora.reliability/v1alpha1
+kind: ChaosExperiment
+metadata:
+  name: payment-database-latency-injection
+spec:
+  targetService: checkout-service
+  environment: staging
+  fault:
+    type: LATENCY_INJECTION
+    latencyMs: 250
+    jitterMs: 50
+  durationSeconds: 120
+  guardrails:
+    - metric: http_5xx_rate
+      comparison: GREATER_THAN
+      threshold: 0.05
+      evaluationWindowSeconds: 10
+      action: EMERGENCY_ABORT

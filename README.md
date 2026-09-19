@@ -2,91 +2,97 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Node.js%2022%20%7C%20TypeScript-61dafb.svg)](https://nodejs.org)
-[![Architecture](https://img.shields.io/badge/Architecture-Modular%20Workspace-green.svg)](#architecture)
-[![Reliability](https://img.shields.io/badge/SRE-SLO%20%26%20Chaos%20Resilience-purple.svg)](#key-capabilities)
+[![Architecture](https://img.shields.io/badge/Architecture-Enterprise%20Monorepo-green.svg)](#repository-layout)
+[![Reliability](https://img.shields.io/badge/SRE-Autonomous%20Resilience%20Platform-purple.svg)](#capabilities)
 
-> **AURORA** is a next-generation Cloud Reliability, Service Level Objective (SLO) Orchestration, and Resilience Engineering platform designed to unify synthetic canary telemetry, error budget accounting, and automated fault injection into a unified SRE command plane.
-
----
-
-## 🌟 Key Capabilities
-
-- **📊 Dynamic SLO & Error Budget Tracking**: Automated multi-window, multi-burn-rate alerting across microservices with real-time error budget consumption forecasting.
-- **🛰️ Synthetic Canary & Health Probing**: High-frequency, distributed synthetic transaction probes testing real user critical paths (HTTP/gRPC/WebSocket).
-- **🧪 Autonomous Resilience & Chaos Injection**: Controlled fault injection (latency, packet loss, service isolation, resource saturation) with automated rollback when error budgets breach threshold.
-- **🚨 Unified Incident Signal Correlation**: Correlate anomaly spikes, degradation patterns, and telemetry signals into actionable incident contexts.
-- **🖥️ Command Center UI**: Real-time reactive glassmorphic observability console tailored for SRE and on-call engineers.
+> **AURORA** is an enterprise-grade Autonomous Cloud Reliability, Service Level Objective (SLO) Governance, and Resilience Engineering platform. It integrates distributed synthetic canary probing, error-budget burn-rate accounting, statistical anomaly detection, AI-assisted root cause analysis (RCA), and automated chaos resilience validation into a unified SRE command plane.
 
 ---
 
-## 🏗️ Architecture Overview
+## 🏗️ Repository Layout
 
-```mermaid
-graph TD
-    subgraph "Clients & Ingress"
-        WEB["AURORA Command Center (apps/dashboard)"]
-        CLI["Aurora CLI / API Client"]
-    end
-
-    subgraph "AURORA Control Plane"
-        API["Core Engine Ingress / API"]
-        SLO["SLO & Error Budget Engine"]
-        PROBE["Synthetic Probe Orchestrator"]
-        CHAOS["Resilience & Fault Injector"]
-        CORR["Signal Correlation & Alert Engine"]
-    end
-
-    subgraph "Target Ecosystem"
-        SVC["Microservices & Kubernetes Clusters"]
-        METRICS["Telemetry Sources (Prometheus / OTel / CloudWatch)"]
-    end
-
-    WEB -->|WebSocket / REST| API
-    CLI -->|REST| API
-    API --> SLO
-    API --> PROBE
-    API --> CHAOS
-    API --> CORR
-
-    PROBE -->|Canary Checks| SVC
-    CHAOS -->|Fault Injection| SVC
-    METRICS -->|Telemetry Ingestion| SLO
-    SLO -->|Budget Alerts| CORR
+```
+aurora-reliability-platform/
+│
+├── README.md                  # Comprehensive repository documentation
+├── LICENSE                    # Apache-2.0 open-source license
+├── .gitignore                 # Universal git ignore configuration
+├── .env.example               # Environment variables template
+├── docker-compose.yml         # Multi-service & observability container orchestration
+│
+├── docs/                      # Technical design & documentation
+│   ├── architecture/          # System design specifications & C4 model
+│   ├── api/                   # REST/gRPC API specifications
+│   ├── adr/                   # Architecture Decision Records
+│   ├── ai/                    # AI/ML anomaly detection & RCA models
+│   ├── reliability/           # Multi-Window Multi-Burn-Rate (MWMBR) SLO standards
+│   └── security/              # Zero-trust security & access control
+│
+├── platform/                  # Core backend microservices
+│   ├── gateway/               # Ingress reverse-proxy, rate limiter, auth dispatcher
+│   ├── identity-service/      # IAM, RBAC, service mesh identity & token broker
+│   ├── incident-service/      # Alert grouping, on-call paging, incident lifecycle
+│   ├── telemetry-service/     # High-throughput OpenTelemetry ingestion pipeline
+│   ├── policy-service/        # SLO definition, budget calculation, deployment freeze rules
+│   └── recovery-service/      # Self-healing orchestrator & automated rollback triggers
+│
+├── agent/                     # Edge execution agents
+│   └── aurora-agent/          # Distributed synthetic probe runner & host health monitor
+│
+├── intelligence/              # Analytics & Machine Learning engines
+│   ├── anomaly-engine/        # Statistical and ML-based metric outlier detection
+│   ├── prediction-engine/     # Error budget exhaustion time-series forecasting
+│   ├── rca-engine/            # Graph causality and topological root-cause analyzer
+│   └── ai-engine/             # LLM incident summarization & interactive runbook copilot
+│
+├── frontend/                  # Modern operator interfaces
+│   └── aurora-console/        # Glassmorphic React/Vite SRE Command Center UI
+│
+├── infrastructure/            # Cloud & orchestration automation
+│   ├── docker/                # Multi-stage production container Dockerfiles
+│   ├── kubernetes/            # Production K8s manifests and CRDs
+│   ├── terraform/             # Cloud infrastructure as code
+│   └── helm/                  # Helm charts for automated cluster deployment
+│
+├── observability/             # End-to-end monitoring stack configs
+│   ├── otel/                  # OpenTelemetry collector configuration
+│   ├── prometheus/            # Prometheus scrape targets & alert rules
+│   ├── grafana/               # Pre-provisioned SRE dashboards
+│   └── loki/                  # Log aggregation configuration
+│
+├── experiments/               # Resilience & performance research
+│   ├── ml/                    # Anomaly training datasets and model notebooks
+│   ├── chaos/                 # Chaos injection scenario manifests
+│   └── benchmarks/            # Throughput & latency stress harnesses
+│
+├── tests/                     # Verification test suites
+│   ├── integration/           # Cross-service end-to-end integration tests
+│   ├── chaos/                 # Automated resilience and safety guardrail tests
+│   └── performance/           # Load testing scenarios
+│
+└── scripts/                   # Developer automation & lifecycle scripts
 ```
 
 ---
 
-## 📁 Repository Layout
+## 🌟 Capabilities
 
-```
-AURORA/
-├── apps/
-│   └── dashboard/          # AURORA Observability & SRE Command Center (React/Vite)
-├── services/
-│   └── engine/             # Core reliability engine, probe runners & SLO evaluators
-├── packages/
-│   └── types/              # Canonical shared domain models (SLOs, Probes, Chaos, Alerts)
-├── docs/
-│   ├── architecture/       # Detailed technical design specifications
-│   └── adr/                # Architecture Decision Records (ADR)
-├── .editorconfig           # Code formatting standards
-├── .gitignore              # Repository exclusion rules
-├── package.json            # Root workspace configuration
-├── tsconfig.base.json      # Shared strict TypeScript configuration
-└── README.md               # Repository documentation
-```
+- **📊 Autonomous SLO Governance**: Multi-Window Multi-Burn-Rate (MWMBR) calculations, error budget exhaustion forecasting, and automated deployment gate freezes.
+- **🛰️ Distributed Synthetic Canaries**: Sub-second synthetic transaction probes running globally over HTTP/S, gRPC, and WebSockets.
+- **🧠 Intelligence & AI RCA**: Graph causality and predictive forecasting to isolate degraded microservices and generate automated runbook steps.
+- **🧪 Safety-Gated Chaos Engineering**: Controlled fault injection (latency, packet loss, blackholes) with autonomous circuit-breaker aborts.
+- **🖥️ Glassmorphic SRE Cockpit**: Live telemetry visualization, error budget tracking, and real-time incident command.
 
 ---
 
 ## 🚀 Quick Start
 
 ### Prerequisites
+- **Node.js**: `>= 20.0.0` (tested on Node `v22.11.0`)
+- **npm**: `>= 10.0.0`
+- **Docker & Docker Compose** (optional, for running the full stack)
 
-- **Node.js**: `v20.0.0` or higher (verified on Node `v22.11.0`)
-- **npm**: `v10.0.0` or higher
-
-### Setup
-
+### 1. Installation
 ```bash
 # Clone the repository
 git clone https://github.com/organization/aurora-reliability-platform.git
@@ -96,25 +102,24 @@ cd aurora-reliability-platform
 npm install
 ```
 
-### Development Modes
-
+### 2. Launch Development Stack
 ```bash
-# Launch the Core Reliability Engine
-npm run dev:engine
+# Run the Aurora SRE Console UI
+npm run dev:console
 
-# Launch the AURORA Command Center Dashboard
-npm run dev:dashboard
+# Run the API Gateway
+npm run dev:gateway
+
+# Run the Edge Probing Agent
+npm run dev:agent
+```
+
+### 3. Run Full Docker Compose Stack
+```bash
+docker compose up -d
 ```
 
 ---
 
-## 📖 Documentation & ADRs
-
-- [Architecture Blueprint](docs/architecture/system-overview.md)
-- [ADR-0001: Monorepo Architecture & Technology Foundation](docs/adr/0001-repository-and-architecture-foundation.md)
-
----
-
 ## 📜 License
-
 Licensed under the [Apache License, Version 2.0](LICENSE).

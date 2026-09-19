@@ -1,0 +1,20 @@
+replicaCount: 2
+
+image:
+  repository: aurora
+  pullPolicy: IfNotPresent
+  tag: "0.1.0"
+
+gateway:
+  service:
+    type: ClusterIP
+    port: 8080
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: aurora.internal
+      paths:
+        - path: /
+          pathType: Prefix

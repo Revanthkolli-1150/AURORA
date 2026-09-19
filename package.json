@@ -1,20 +1,26 @@
 {
   "name": "aurora-reliability-platform",
   "version": "0.1.0",
-  "description": "AURORA - Next-Generation Cloud Reliability, SLO Management, and Resilience Testing Platform",
+  "description": "AURORA - Next-Generation Cloud Reliability, Autonomous SLO Management, and Resilience Engineering Platform",
   "private": true,
   "type": "module",
   "workspaces": [
     "packages/*",
-    "services/*",
-    "apps/*"
+    "frontend/*",
+    "platform/*",
+    "agent/*",
+    "intelligence/*",
+    "tests"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
-    "dev:engine": "npm run dev --workspace=services/engine",
-    "dev:dashboard": "npm run dev --workspace=apps/dashboard"
+    "dev:console": "npm run dev --workspace=@aurora/console",
+    "dev:gateway": "npm run dev --workspace=@aurora/gateway",
+    "dev:agent": "npm run dev --workspace=@aurora/agent",
+    "dev:telemetry": "npm run dev --workspace=@aurora/telemetry-service",
+    "dev:policy": "npm run dev --workspace=@aurora/policy-service"
   },
   "keywords": [
     "aurora",
@@ -25,14 +31,16 @@
     "error-budgets",
     "chaos-engineering",
     "observability",
-    "synthetic-monitoring"
+    "synthetic-monitoring",
+    "anomaly-detection",
+    "rca"
   ],
   "author": "AURORA Reliability Engineering Team",
   "license": "Apache-2.0",
+  "devDependencies": {
+    "@types/node": "^22.5.5"
+  },
   "engines": {
     "node": ">=20.0.0"
-  },
-  "devDependencies": {
-    "@types/node": "^26.6.2"
   }
 }

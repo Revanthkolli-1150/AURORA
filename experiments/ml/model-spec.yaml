@@ -1,0 +1,9 @@
+experiment_id: exp-ml-001
+model_type: isolation_forest
+features:
+  - cpu_utilization
+  - memory_working_set
+  - network_egress_bytes
+  - http_request_duration_p99
+training_window_days: 14
+contamination_factor: 0.01

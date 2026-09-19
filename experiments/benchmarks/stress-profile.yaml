@@ -1,0 +1,10 @@
+benchmark_name: gateway_throughput_stress
+concurrency_levels:
+  - 100
+  - 500
+  - 1000
+  - 2500
+ramp_up_duration: 30s
+steady_state_duration: 5m
+sla_p99_max_ms: 100
+max_error_rate_percent: 0.01

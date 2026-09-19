@@ -1,0 +1,122 @@
+version: '3.8'
+
+services:
+  # ----------------------------------------------------------------------------
+  # Control Plane & UI
+  # ----------------------------------------------------------------------------
+  aurora-console:
+    build:
+      context: ./frontend/aurora-console
+      dockerfile: ../../infrastructure/docker/Dockerfile.node
+    container_name: aurora-console
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_API_GATEWAY_URL=http://localhost:8080
+    depends_on:
+      - gateway
+
+  gateway:
+    build:
+      context: ./platform/gateway
+      dockerfile: ../../infrastructure/docker/Dockerfile.node
+    container_name: aurora-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - TELEMETRY_SERVICE_URL=http://telemetry-service:8083
+      - POLICY_SERVICE_URL=http://policy-service:8084
+      - INCIDENT_SERVICE_URL=http://incident-service:8082
+    depends_on:
+      - telemetry-service
+      - policy-service
+
+  # ----------------------------------------------------------------------------
+  # Core Platform Microservices
+  # ----------------------------------------------------------------------------
+  telemetry-service:
+    build:
+      context: ./platform/telemetry-service
+      dockerfile: ../../infrastructure/docker/Dockerfile.node
+    container_name: aurora-telemetry-service
+    ports:
+      - "8083:8083"
+    environment:
+      - PORT=8083
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+
+  policy-service:
+    build:
+      context: ./platform/policy-service
+      dockerfile: ../../infrastructure/docker/Dockerfile.node
+    container_name: aurora-policy-service
+    ports:
+      - "8084:8084"
+    environment:
+      - PORT=8084
+
+  incident-service:
+    build:
+      context: ./platform/incident-service
+      dockerfile: ../../infrastructure/docker/Dockerfile.node
+    container_name: aurora-incident-service
+    ports:
+      - "8082:8082"
+    environment:
+      - PORT=8082
+
+  recovery-service:
+    build:
+      context: ./platform/recovery-service
+      dockerfile: ../../infrastructure/docker/Dockerfile.node
+    container_name: aurora-recovery-service
+    ports:
+      - "8085:8085"
+    environment:
+      - PORT=8085
+
+  # ----------------------------------------------------------------------------
+  # Intelligence Engines
+  # ----------------------------------------------------------------------------
+  anomaly-engine:
+    build:
+      context: ./intelligence/anomaly-engine
+      dockerfile: ../../infrastructure/docker/Dockerfile.node
+    container_name: aurora-anomaly-engine
+    ports:
+      - "9001:9001"
+
+  # ----------------------------------------------------------------------------
+  # Observability Pipeline
+  # ----------------------------------------------------------------------------
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.95.0
+    container_name: aurora-otel-collector
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./observability/otel/otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4317:4317" # OTLP gRPC receiver
+      - "4318:4318" # OTLP HTTP receiver
+      - "8889:8889" # Prometheus metrics exporter
+
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: aurora-prometheus
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: aurora-grafana
+    ports:
+      - "3001:3000"
+    volumes:
+      - ./observability/grafana:/etc/grafana/provisioning
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - prometheus

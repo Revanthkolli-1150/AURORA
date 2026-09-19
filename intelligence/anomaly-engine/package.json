@@ -1,0 +1,15 @@
+{
+  "name": "@aurora/anomaly-engine",
+  "version": "0.1.0",
+  "description": "AURORA Metric Outlier & Statistical Anomaly Detection Engine",
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "node --watch src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@aurora/types": "*"
+  }
+}

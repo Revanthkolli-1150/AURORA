@@ -1,0 +1,16 @@
+{
+  "name": "@aurora/tests",
+  "version": "0.1.0",
+  "description": "AURORA Integration, Chaos & Performance Test Suites",
+  "type": "module",
+  "scripts": {
+    "test": "node --test dist/**/*.test.js",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@aurora/types": "*",
+    "@aurora/policy-service": "*",
+    "@aurora/recovery-service": "*",
+    "@aurora/telemetry-service": "*"
+  }
+}

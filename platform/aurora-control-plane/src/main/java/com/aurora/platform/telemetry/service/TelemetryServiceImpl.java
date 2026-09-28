@@ -1,10 +1,12 @@
 package com.aurora.platform.telemetry.service;
 
 import com.aurora.platform.common.exception.ResourceNotFoundException;
-import com.aurora.platform.resources.service.ResourceService;
+import com.aurora.platform.common.exception.ValidationException;
+import com.aurora.platform.resource.service.ResourceService;
 import com.aurora.platform.telemetry.dto.IngestTelemetryRequest;
 import com.aurora.platform.telemetry.dto.TelemetryEventResponse;
 import com.aurora.platform.telemetry.entity.TelemetryEventEntity;
+import com.aurora.platform.telemetry.entity.TelemetryType;
 import com.aurora.platform.telemetry.repository.TelemetryEventRepository;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -42,6 +44,14 @@ public class TelemetryServiceImpl implements TelemetryService {
         log.debug("Ingesting telemetry for resource ID {}: metric='{}', value={}",
                 request.resourceId(), request.metricName(), request.value());
 
+        if (request.value() == null || Double.isNaN(request.value()) || Double.isInfinite(request.value())) {
+            throw new ValidationException("Telemetry value must be a finite number");
+        }
+
+        if (request.type() != TelemetryType.METRIC) {
+            throw new ValidationException("Only METRIC telemetry ingestion is supported in Phase 1B");
+        }
+
         if (!resourceService.existsById(request.resourceId())) {
             throw new ResourceNotFoundException("Resource with ID '" + request.resourceId() + "' not found");
         }
@@ -73,12 +83,19 @@ public class TelemetryServiceImpl implements TelemetryService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<TelemetryEventResponse> getTelemetryByResourceId(UUID resourceId) {
+    public List<TelemetryEventResponse> getTelemetryByResourceId(UUID resourceId, String metricName) {
         if (!resourceService.existsById(resourceId)) {
             throw new ResourceNotFoundException("Resource with ID '" + resourceId + "' not found");
         }
-        return telemetryEventRepository.findByResourceIdOrderByTimestampDesc(resourceId)
-                .stream()
+
+        List<TelemetryEventEntity> entities;
+        if (metricName != null && !metricName.isBlank()) {
+            entities = telemetryEventRepository.findByResourceIdAndMetricNameOrderByTimestampAsc(resourceId, metricName.trim());
+        } else {
+            entities = telemetryEventRepository.findByResourceIdOrderByTimestampAsc(resourceId);
+        }
+
+        return entities.stream()
                 .map(this::mapToResponse)
                 .toList();
     }

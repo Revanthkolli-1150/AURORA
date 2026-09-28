@@ -1,7 +1,8 @@
 package com.aurora.platform.telemetry.service;
 
 import com.aurora.platform.common.exception.ResourceNotFoundException;
-import com.aurora.platform.resources.service.ResourceService;
+import com.aurora.platform.common.exception.ValidationException;
+import com.aurora.platform.resource.service.ResourceService;
 import com.aurora.platform.telemetry.dto.IngestTelemetryRequest;
 import com.aurora.platform.telemetry.dto.TelemetryEventResponse;
 import com.aurora.platform.telemetry.entity.TelemetryEventEntity;
@@ -12,6 +13,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -90,6 +93,29 @@ class TelemetryServiceTest {
         verify(telemetryEventRepository).save(any(TelemetryEventEntity.class));
     }
 
+    @ParameterizedTest
+    @EnumSource(value = TelemetryType.class, names = {"LOG", "TRACE", "EVENT"})
+    @DisplayName("Should throw ValidationException when attempting to ingest non-METRIC telemetry type")
+    void shouldThrowValidationExceptionWhenTypeNotMetric(TelemetryType type) {
+        UUID resourceId = UUID.randomUUID();
+        IngestTelemetryRequest request = new IngestTelemetryRequest(
+                resourceId,
+                Instant.now(),
+                type,
+                "log.message",
+                1.0,
+                "count",
+                null
+        );
+
+        assertThatThrownBy(() -> telemetryService.ingestTelemetry(request))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("Only METRIC telemetry ingestion is supported in Phase 1B");
+
+        verify(resourceService, never()).existsById(any());
+        verify(telemetryEventRepository, never()).save(any());
+    }
+
     @Test
     @DisplayName("Should throw ResourceNotFoundException when ingesting telemetry for non-existent resource")
     void shouldThrowNotFoundWhenResourceMissingOnIngest() {
@@ -114,8 +140,8 @@ class TelemetryServiceTest {
     }
 
     @Test
-    @DisplayName("Should retrieve telemetry events for a valid resource")
-    void shouldRetrieveTelemetryForResource() {
+    @DisplayName("Should retrieve telemetry events for a valid resource ordered oldest to newest")
+    void shouldRetrieveTelemetryForResourceChronologicallyAsc() {
         UUID resourceId = UUID.randomUUID();
         when(resourceService.existsById(resourceId)).thenReturn(true);
 
@@ -129,13 +155,39 @@ class TelemetryServiceTest {
                 .unit("ms")
                 .build();
 
-        when(telemetryEventRepository.findByResourceIdOrderByTimestampDesc(resourceId))
+        when(telemetryEventRepository.findByResourceIdOrderByTimestampAsc(resourceId))
                 .thenReturn(List.of(entity));
 
-        List<TelemetryEventResponse> results = telemetryService.getTelemetryByResourceId(resourceId);
+        List<TelemetryEventResponse> results = telemetryService.getTelemetryByResourceId(resourceId, null);
 
         assertThat(results).hasSize(1);
         assertThat(results.get(0).metricName()).isEqualTo("http.requests.latency");
+    }
+
+    @Test
+    @DisplayName("Should filter telemetry events by metricName")
+    void shouldFilterTelemetryByMetricName() {
+        UUID resourceId = UUID.randomUUID();
+        when(resourceService.existsById(resourceId)).thenReturn(true);
+
+        TelemetryEventEntity entity = TelemetryEventEntity.builder()
+                .id(UUID.randomUUID())
+                .resourceId(resourceId)
+                .timestamp(Instant.now())
+                .type(TelemetryType.METRIC)
+                .metricName("cpu_usage")
+                .value(78.4)
+                .unit("percent")
+                .build();
+
+        when(telemetryEventRepository.findByResourceIdAndMetricNameOrderByTimestampAsc(resourceId, "cpu_usage"))
+                .thenReturn(List.of(entity));
+
+        List<TelemetryEventResponse> results = telemetryService.getTelemetryByResourceId(resourceId, "cpu_usage");
+
+        assertThat(results).hasSize(1);
+        assertThat(results.get(0).metricName()).isEqualTo("cpu_usage");
+        assertThat(results.get(0).value()).isEqualTo(78.4);
     }
 
     @Test
@@ -144,7 +196,7 @@ class TelemetryServiceTest {
         UUID nonExistentId = UUID.randomUUID();
         when(resourceService.existsById(nonExistentId)).thenReturn(false);
 
-        assertThatThrownBy(() -> telemetryService.getTelemetryByResourceId(nonExistentId))
+        assertThatThrownBy(() -> telemetryService.getTelemetryByResourceId(nonExistentId, null))
                 .isInstanceOf(ResourceNotFoundException.class)
                 .hasMessageContaining("Resource with ID '" + nonExistentId + "' not found");
     }

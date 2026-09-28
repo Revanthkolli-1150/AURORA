@@ -1,7 +1,7 @@
 package com.aurora.platform.recovery.service;
 
 import com.aurora.platform.common.exception.ResourceNotFoundException;
-import com.aurora.platform.incidents.service.IncidentService;
+import com.aurora.platform.incident.service.IncidentService;
 import com.aurora.platform.recovery.dto.RecoveryActionResponse;
 import com.aurora.platform.recovery.dto.RecoveryPlanResponse;
 import com.aurora.platform.recovery.entity.RecoveryActionEntity;

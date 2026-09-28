@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-AURORA is an AI-driven autonomous reliability and self-healing infrastructure platform. The Control Plane v0.1 serves as the foundational centralized brain and system-of-record responsible for monitoring infrastructure assets, ingesting telemetry signals, tracking correlated reliability incidents, and planning remediation actions.
+AURORA is an infrastructure reliability platform designed to progress toward autonomous self-healing operations. The Control Plane v0.1 serves as the foundational centralized system-of-record and deterministic reliability core responsible for monitoring infrastructure assets, ingesting telemetry signals, tracking correlated reliability incidents, evaluating deterministic statistical anomalies and RCA evidence, and exposing read-only recovery proposals.
 
 This document outlines the architectural principles, domain decomposition, request lifecycle, data persistence design, and evolutionary roadmap of the Control Plane v0.1.
 

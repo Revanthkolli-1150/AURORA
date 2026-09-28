@@ -13,21 +13,26 @@ public record IngestTelemetryRequest(
         @NotNull(message = "Resource ID is required")
         UUID resourceId,
 
+        @NotNull(message = "Timestamp is required")
         Instant timestamp,
 
         @NotNull(message = "Telemetry type is required")
         TelemetryType type,
 
         @NotBlank(message = "Metric name is required")
-        @Size(max = 255, message = "Metric name must not exceed 255 characters")
+        @Size(min = 1, max = 255, message = "Metric name must be between 1 and 255 characters")
         String metricName,
 
         @NotNull(message = "Value is required")
         Double value,
 
         @NotBlank(message = "Unit is required")
-        @Size(max = 50, message = "Unit must not exceed 50 characters")
+        @Size(min = 1, max = 50, message = "Unit must be between 1 and 50 characters")
         String unit,
 
         Map<String, Object> metadata
-) {}
+) {
+    public IngestTelemetryRequest(UUID resourceId, Instant timestamp, TelemetryType type, String metricName, Double value, String unit) {
+        this(resourceId, timestamp, type, metricName, value, unit, null);
+    }
+}

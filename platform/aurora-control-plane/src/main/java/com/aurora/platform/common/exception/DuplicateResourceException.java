@@ -1,6 +1,6 @@
 package com.aurora.platform.common.exception;
 
-public class DuplicateResourceException extends RuntimeException {
+public class DuplicateResourceException extends ConflictException {
     public DuplicateResourceException(String message) {
         super(message);
     }

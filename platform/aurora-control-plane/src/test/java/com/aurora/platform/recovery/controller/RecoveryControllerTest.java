@@ -1,6 +1,6 @@
 package com.aurora.platform.recovery.controller;
 
-import com.aurora.platform.common.config.CorrelationIdFilter;
+import com.aurora.platform.common.web.CorrelationIdFilter;
 import com.aurora.platform.common.config.JacksonConfig;
 import com.aurora.platform.common.exception.GlobalExceptionHandler;
 import com.aurora.platform.common.exception.ResourceNotFoundException;

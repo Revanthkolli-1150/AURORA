@@ -5,11 +5,20 @@
 [![Architecture](https://img.shields.io/badge/Architecture-Enterprise%20Monorepo-green.svg)](#repository-layout)
 [![Reliability](https://img.shields.io/badge/SRE-Autonomous%20Resilience%20Platform-purple.svg)](#capabilities)
 
-> **AURORA** is an enterprise-grade Autonomous Cloud Reliability, Service Level Objective (SLO) Governance, and Resilience Engineering platform. It integrates distributed synthetic canary probing, error-budget burn-rate accounting, statistical anomaly detection, AI-assisted root cause analysis (RCA), and automated chaos resilience validation into a unified SRE command plane.
+> **AURORA** is an autonomous reliability platform that observes software systems, understands failures, detects anomalies, investigates root causes, predicts incidents, plans safe recovery, executes controlled recovery, verifies the result, and learns from incidents.
 
 ---
 
-## 🏗️ Repository Layout
+## 🏛️ Architecture: Current vs. Target
+
+### Current Execution Architecture (Modular Monolith)
+Per [ADR-001](docs/adr/ADR-001-modular-control-plane.md), AURORA's active backend is currently implemented as a single, production-grade **Modular Monolith**:
+- **Control Plane**: `platform/aurora-control-plane` (Java 21 LTS, Spring Boot 3.3.4, Spring Data JPA, Flyway V1–V5)
+- **Database**: PostgreSQL 16
+- **Console Frontend**: `frontend/aurora-console` (React / Vite)
+
+### Long-Term Target Architecture
+The canonical repository structure below represents the long-term architectural destination for future service extractions per [ADR-003](docs/adr/ADR-003-controlled-future-service-extraction.md).
 
 ```
 aurora-reliability-platform/
@@ -18,23 +27,24 @@ aurora-reliability-platform/
 ├── LICENSE                    # Apache-2.0 open-source license
 ├── .gitignore                 # Universal git ignore configuration
 ├── .env.example               # Environment variables template
-├── docker-compose.yml         # Multi-service & observability container orchestration
+├── docker-compose.yml         # Container orchestration
 │
 ├── docs/                      # Technical design & documentation
-│   ├── architecture/          # System design specifications & C4 model
+│   ├── architecture/          # System design specifications
 │   ├── api/                   # REST/gRPC API specifications
 │   ├── adr/                   # Architecture Decision Records
-│   ├── ai/                    # AI/ML anomaly detection & RCA models
-│   ├── reliability/           # Multi-Window Multi-Burn-Rate (MWMBR) SLO standards
-│   └── security/              # Zero-trust security & access control
+│   ├── ai/                    # Intelligence & RCA specifications
+│   ├── reliability/           # Reliability & anomaly detection standards
+│   └── security/              # Security & access control
 │
-├── platform/                  # Core backend microservices
-│   ├── gateway/               # Ingress reverse-proxy, rate limiter, auth dispatcher
-│   ├── identity-service/      # IAM, RBAC, service mesh identity & token broker
-│   ├── incident-service/      # Alert grouping, on-call paging, incident lifecycle
-│   ├── telemetry-service/     # High-throughput OpenTelemetry ingestion pipeline
-│   ├── policy-service/        # SLO definition, budget calculation, deployment freeze rules
-│   └── recovery-service/      # Self-healing orchestrator & automated rollback triggers
+├── platform/
+│   ├── aurora-control-plane/  # Current executable modular monolith backend
+│   ├── gateway/               # Target API gateway (future)
+│   ├── identity-service/      # Target IAM & auth service (future)
+│   ├── incident-service/      # Target extracted incident service (future)
+│   ├── telemetry-service/     # Target high-throughput streaming ingest (future)
+│   ├── policy-service/        # Target safety policy service (future)
+│   └── recovery-service/      # Target autonomous remediation service (future)
 │
 ├── agent/                     # Edge execution agents
 │   └── aurora-agent/          # Distributed synthetic probe runner & host health monitor

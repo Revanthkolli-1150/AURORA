@@ -52,3 +52,26 @@ aurora:
   control-plane:
     version: 0.1.0
     environment: ${AURORA_ENV:development}
+  intelligence:
+    anomaly:
+      default-threshold: 3.0
+      min-sample-count: 10
+      detector: ${AURORA_ANOMALY_DETECTOR:Z_SCORE}
+    incident:
+      correlation-window-seconds: 300
+    rca:
+      lookback-minutes: 10
+      graph:
+        smoothing-beta: 5.0
+        max-history-incidents: 100
+        lookback-minutes: 10
+        enabled: true
+    narrative:
+      enabled: ${AURORA_NARRATIVE_ENABLED:true}
+      provider: ${AURORA_NARRATIVE_PROVIDER:openai-compatible}
+      base-url: ${LLM_BASE_URL:https://api.openai.com/v1}
+      api-key: ${LLM_API_KEY:}
+      model: ${LLM_MODEL:gpt-4o-mini}
+      timeout-ms: 5000
+      max-retries: 1
+      temperature: 0.0

@@ -10,5 +10,9 @@ public interface TelemetryService {
 
     TelemetryEventResponse ingestTelemetry(IngestTelemetryRequest request);
 
-    List<TelemetryEventResponse> getTelemetryByResourceId(UUID resourceId);
+    List<TelemetryEventResponse> getTelemetryByResourceId(UUID resourceId, String metricName);
+
+    default List<TelemetryEventResponse> getTelemetryByResourceId(UUID resourceId) {
+        return getTelemetryByResourceId(resourceId, null);
+    }
 }

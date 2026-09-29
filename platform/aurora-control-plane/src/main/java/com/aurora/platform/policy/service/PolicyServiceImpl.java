@@ -32,10 +32,54 @@ public class PolicyServiceImpl implements PolicyService {
 
     @Override
     @Transactional(readOnly = true)
+    public List<PolicyResponse> getAllPolicies(ResourceType targetResourceType, Boolean enabledOnly) {
+        List<PolicyEntity> policies;
+        if (Boolean.TRUE.equals(enabledOnly)) {
+            policies = (targetResourceType != null)
+                    ? policyRepository.findByTargetResourceTypeAndEnabledTrue(targetResourceType)
+                    : policyRepository.findByEnabledTrue();
+        } else {
+            policies = (targetResourceType != null)
+                    ? policyRepository.findByTargetResourceType(targetResourceType)
+                    : policyRepository.findAll();
+        }
+        return policies.stream().map(this::mapToResponse).toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public PolicyResponse getPolicyById(UUID id) {
         return policyRepository.findById(id)
                 .map(this::mapToResponse)
                 .orElseThrow(() -> new ResourceNotFoundException("Policy with ID '" + id + "' not found"));
+    }
+
+    @Override
+    @Transactional
+    public PolicyResponse createPolicy(com.aurora.platform.policy.dto.CreatePolicyRequest request) {
+        PolicyEntity entity = PolicyEntity.builder()
+                .name(request.name().trim())
+                .targetResourceType(request.targetResourceType())
+                .metricName(request.metricName().trim())
+                .threshold(request.threshold())
+                .action(request.action().trim())
+                .enabled(request.enabled() != null ? request.enabled() : true)
+                .build();
+
+        PolicyEntity saved = policyRepository.save(entity);
+        return mapToResponse(saved);
+    }
+
+    @Override
+    @Transactional
+    public PolicyResponse updatePolicyStatus(UUID id, boolean enabled) {
+        PolicyEntity entity = policyRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Policy with ID '" + id + "' not found"));
+
+        entity.setEnabled(enabled);
+        entity.setUpdatedAt(java.time.Instant.now());
+        PolicyEntity updated = policyRepository.save(entity);
+        return mapToResponse(updated);
     }
 
     private PolicyResponse mapToResponse(PolicyEntity entity) {

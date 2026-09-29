@@ -1,10 +1,13 @@
 package com.aurora.platform.recovery.controller;
 
+import com.aurora.platform.recovery.dto.RecoveryActionResponse;
 import com.aurora.platform.recovery.dto.RecoveryPlanResponse;
 import com.aurora.platform.recovery.service.RecoveryService;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -24,5 +27,19 @@ public class RecoveryController {
     public ResponseEntity<RecoveryPlanResponse> getRecoveryPlan(@PathVariable UUID incidentId) {
         RecoveryPlanResponse plan = recoveryService.getRecoveryPlanByIncidentId(incidentId);
         return ResponseEntity.ok(plan);
+    }
+
+    @PostMapping("/{incidentId}/recovery-plan")
+    public ResponseEntity<RecoveryPlanResponse> generateRecoveryPlan(@PathVariable UUID incidentId) {
+        RecoveryPlanResponse plan = recoveryService.generateRecoveryPlan(incidentId);
+        return ResponseEntity.status(HttpStatus.CREATED).body(plan);
+    }
+
+    @PostMapping("/{incidentId}/recovery-plan/actions/{actionId}/approve")
+    public ResponseEntity<RecoveryActionResponse> approveAction(
+            @PathVariable UUID incidentId,
+            @PathVariable UUID actionId) {
+        RecoveryActionResponse approved = recoveryService.approveRecoveryAction(incidentId, actionId);
+        return ResponseEntity.ok(approved);
     }
 }

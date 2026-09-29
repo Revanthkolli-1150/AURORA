@@ -11,4 +11,8 @@ import java.util.UUID;
 public interface RecoveryActionRepository extends JpaRepository<RecoveryActionEntity, UUID> {
 
     List<RecoveryActionEntity> findByRecoveryPlanId(UUID recoveryPlanId);
+
+    List<RecoveryActionEntity> findByTargetAndActionType(String target, String actionType);
+
+    List<RecoveryActionEntity> findByTarget(String target);
 }

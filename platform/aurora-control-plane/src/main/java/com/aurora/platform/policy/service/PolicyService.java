@@ -10,5 +10,11 @@ public interface PolicyService {
 
     List<PolicyResponse> getActivePolicies(ResourceType targetResourceType);
 
+    List<PolicyResponse> getAllPolicies(ResourceType targetResourceType, Boolean enabledOnly);
+
     PolicyResponse getPolicyById(UUID id);
+
+    PolicyResponse createPolicy(com.aurora.platform.policy.dto.CreatePolicyRequest request);
+
+    PolicyResponse updatePolicyStatus(UUID id, boolean enabled);
 }

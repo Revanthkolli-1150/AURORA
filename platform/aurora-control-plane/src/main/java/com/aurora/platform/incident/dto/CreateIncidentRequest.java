@@ -25,7 +25,6 @@ public record CreateIncidentRequest(
         @NotNull(message = "Status is required")
         IncidentStatus status,
 
-        @NotNull(message = "Confidence score is required")
         Double confidence,
 
         String rootCause,

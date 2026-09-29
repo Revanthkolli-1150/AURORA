@@ -4,25 +4,32 @@ import com.aurora.platform.common.web.CorrelationIdFilter;
 import com.aurora.platform.common.config.JacksonConfig;
 import com.aurora.platform.common.exception.GlobalExceptionHandler;
 import com.aurora.platform.common.exception.ResourceNotFoundException;
+import com.aurora.platform.incident.dto.CreateIncidentRequest;
 import com.aurora.platform.incident.dto.IncidentResponse;
 import com.aurora.platform.incident.entity.IncidentSeverity;
 import com.aurora.platform.incident.entity.IncidentStatus;
 import com.aurora.platform.incident.service.IncidentService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -32,6 +39,9 @@ class IncidentControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @MockBean
     private IncidentService incidentService;
@@ -226,5 +236,126 @@ class IncidentControllerTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.status").value(404))
                 .andExpect(jsonPath("$.error").value("RESOURCE_NOT_FOUND"));
+    }
+
+    // ==========================================
+    // MANUAL INCIDENT CREATION TESTS (PHASE 4B)
+    // ==========================================
+
+    @Test
+    @DisplayName("POST /api/v1/incidents - Should create incident and return 201 Created with Location header")
+    void shouldCreateIncidentSuccessfully() throws Exception {
+        UUID incidentId = UUID.randomUUID();
+        UUID resourceId = UUID.randomUUID();
+
+        CreateIncidentRequest request = new CreateIncidentRequest(
+                resourceId,
+                "Manual Alert: Database Degradation",
+                "Operator noticed connection pool depletion manually",
+                IncidentSeverity.HIGH,
+                IncidentStatus.DETECTED,
+                0.90,
+                "Manual observation",
+                Instant.now()
+        );
+
+        IncidentResponse response = new IncidentResponse(
+                incidentId,
+                resourceId,
+                request.title(),
+                request.description(),
+                request.severity(),
+                request.status(),
+                request.confidence(),
+                request.rootCause(),
+                request.detectedAt(),
+                null,
+                Instant.now(),
+                Instant.now()
+        );
+
+        when(incidentService.createIncident(any(CreateIncidentRequest.class))).thenReturn(response);
+
+        mockMvc.perform(post("/api/v1/incidents")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andExpect(header().string("Location", containsString("/api/v1/incidents/" + incidentId)))
+                .andExpect(jsonPath("$.id").value(incidentId.toString()))
+                .andExpect(jsonPath("$.title").value("Manual Alert: Database Degradation"))
+                .andExpect(jsonPath("$.severity").value("HIGH"))
+                .andExpect(jsonPath("$.status").value("DETECTED"));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/incidents - Should return 400 Bad Request on validation failure (blank title)")
+    void shouldReturn400OnValidationFailureBlankTitle() throws Exception {
+        UUID resourceId = UUID.randomUUID();
+        CreateIncidentRequest invalidRequest = new CreateIncidentRequest(
+                resourceId,
+                "", // Blank title
+                "Some description",
+                IncidentSeverity.HIGH,
+                IncidentStatus.DETECTED,
+                null,
+                null,
+                null
+        );
+
+        mockMvc.perform(post("/api/v1/incidents")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(invalidRequest)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.error").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/incidents - Should return 400 Bad Request on validation failure (missing resourceId)")
+    void shouldReturn400OnValidationFailureMissingResource() throws Exception {
+        CreateIncidentRequest invalidRequest = new CreateIncidentRequest(
+                null, // Missing resource ID
+                "Title",
+                "Description",
+                IncidentSeverity.HIGH,
+                IncidentStatus.DETECTED,
+                null,
+                null,
+                null
+        );
+
+        mockMvc.perform(post("/api/v1/incidents")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(invalidRequest)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.error").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/incidents - Should return 404 Not Found when referenced resource does not exist")
+    void shouldReturn404WhenReferencedResourceMissing() throws Exception {
+        UUID nonExistentResourceId = UUID.randomUUID();
+        CreateIncidentRequest request = new CreateIncidentRequest(
+                nonExistentResourceId,
+                "Title",
+                "Description",
+                IncidentSeverity.HIGH,
+                IncidentStatus.DETECTED,
+                null,
+                null,
+                null
+        );
+
+        when(incidentService.createIncident(any(CreateIncidentRequest.class)))
+                .thenThrow(new ResourceNotFoundException("Resource with ID '" + nonExistentResourceId + "' not found"));
+
+        mockMvc.perform(post("/api/v1/incidents")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.error").value("RESOURCE_NOT_FOUND"))
+                .andExpect(jsonPath("$.message").value(containsString(nonExistentResourceId.toString())));
     }
 }

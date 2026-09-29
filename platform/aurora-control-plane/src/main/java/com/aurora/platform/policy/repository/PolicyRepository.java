@@ -13,5 +13,7 @@ public interface PolicyRepository extends JpaRepository<PolicyEntity, UUID> {
 
     List<PolicyEntity> findByTargetResourceTypeAndEnabledTrue(ResourceType targetResourceType);
 
+    List<PolicyEntity> findByTargetResourceType(ResourceType targetResourceType);
+
     List<PolicyEntity> findByEnabledTrue();
 }

@@ -12,6 +12,10 @@ public interface RecoveryActionRepository extends JpaRepository<RecoveryActionEn
 
     List<RecoveryActionEntity> findByRecoveryPlanId(UUID recoveryPlanId);
 
+    List<RecoveryActionEntity> findByTargetResourceIdAndActionType(UUID targetResourceId, String actionType);
+
+    List<RecoveryActionEntity> findByTargetResourceId(UUID targetResourceId);
+
     List<RecoveryActionEntity> findByTargetAndActionType(String target, String actionType);
 
     List<RecoveryActionEntity> findByTarget(String target);

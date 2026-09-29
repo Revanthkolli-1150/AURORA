@@ -11,7 +11,7 @@ coverage/
 # Build Artifacts
 dist/
 build/
-out/
+/out/
 .next/
 .vite/
 target/

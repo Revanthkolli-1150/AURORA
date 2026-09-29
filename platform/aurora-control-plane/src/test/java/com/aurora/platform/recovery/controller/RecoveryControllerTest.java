@@ -150,7 +150,9 @@ class RecoveryControllerTest {
         when(recoveryService.approveRecoveryAction(incidentId, actionId)).thenReturn(approvedAction);
 
         mockMvc.perform(post("/api/v1/incidents/{incidentId}/recovery-plan/actions/{actionId}/approve",
-                        incidentId, actionId))
+                        incidentId, actionId)
+                        .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt()
+                                .jwt(jwt -> jwt.subject("test-operator").claim("capabilities", java.util.List.of("RECOVERY_APPROVE")))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(actionId.toString()))
                 .andExpect(jsonPath("$.status").value("APPROVED"))
@@ -167,8 +169,22 @@ class RecoveryControllerTest {
                 .thenThrow(new ResourceNotFoundException("Recovery action with ID '" + actionId + "' not found"));
 
         mockMvc.perform(post("/api/v1/incidents/{incidentId}/recovery-plan/actions/{actionId}/approve",
-                        incidentId, actionId))
+                        incidentId, actionId)
+                        .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt()
+                                .jwt(jwt -> jwt.subject("test-operator").claim("capabilities", java.util.List.of("RECOVERY_APPROVE")))))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.status").value(404));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/incidents/{incidentId}/recovery-plan/actions/{actionId}/approve - Should return 401 when unauthenticated")
+    void shouldReturn401WhenUnauthenticated() throws Exception {
+        UUID incidentId = UUID.randomUUID();
+        UUID actionId = UUID.randomUUID();
+
+        mockMvc.perform(post("/api/v1/incidents/{incidentId}/recovery-plan/actions/{actionId}/approve",
+                        incidentId, actionId))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("UNAUTHORIZED"));
     }
 }

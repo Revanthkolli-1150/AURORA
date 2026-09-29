@@ -376,4 +376,44 @@ public class ArchitectureRulesTest {
 
         rule.check(importedClasses);
     }
+
+    @Test
+    @DisplayName("Rule F1: Actuator port isolation - domain and application never import external infrastructure clients")
+    void actuatorPortIsolation() {
+        noClasses()
+                .that().resideInAnyPackage("..recovery.domain..", "..recovery.application..")
+                .should().dependOnClassesThat().resideInAnyPackage(
+                        "io.kubernetes..", "com.amazonaws..", "com.google.cloud..", "com.azure.."
+                ).allowEmptyShould(true)
+                .check(importedClasses);
+    }
+
+    @Test
+    @DisplayName("Rule F2: Actuator implementations must reside exclusively in infrastructure actuator package")
+    void actuatorImplementationsInInfrastructure() {
+        classes()
+                .that().implement(com.aurora.platform.recovery.application.port.out.RecoveryActuatorPort.class)
+                .should().resideInAPackage("..recovery.infrastructure.actuator..")
+                .check(importedClasses);
+    }
+
+    @Test
+    @DisplayName("Rule F3: Absolute prohibition of Runtime.exec and ProcessBuilder across the platform")
+    void absoluteProhibitionOfProcessExecution() {
+        noClasses()
+                .should().callMethod(Runtime.class, "exec", String.class)
+                .orShould().callMethod(Runtime.class, "exec", String[].class)
+                .orShould().callConstructor(ProcessBuilder.class, String[].class)
+                .orShould().callConstructor(ProcessBuilder.class, java.util.List.class)
+                .check(importedClasses);
+    }
+
+    @Test
+    @DisplayName("Rule F4: Actuators can only be accessed through the execution orchestrator guard gate")
+    void actuatorAccessRestrictedToOrchestrator() {
+        noClasses()
+                .that().resideOutsideOfPackages("..recovery.application.orchestration..", "..recovery.infrastructure.actuator..")
+                .should().dependOnClassesThat().resideInAPackage("..recovery.infrastructure.actuator..")
+                .check(importedClasses);
+    }
 }

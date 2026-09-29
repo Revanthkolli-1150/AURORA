@@ -100,6 +100,53 @@ public class TelemetryServiceImpl implements TelemetryService {
                 .toList();
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public List<TelemetryEventResponse> getTelemetrySince(UUID resourceId, String metricName, Instant since) {
+        if (!resourceService.existsById(resourceId)) {
+            throw new ResourceNotFoundException("Resource with ID '" + resourceId + "' not found");
+        }
+        if (since == null) {
+            return getTelemetryByResourceId(resourceId, metricName);
+        }
+
+        List<TelemetryEventEntity> entities;
+        if (metricName != null && !metricName.isBlank()) {
+            entities = telemetryEventRepository.findByResourceIdAndMetricNameAndTimestampGreaterThanEqualOrderByTimestampAsc(
+                    resourceId, metricName.trim(), since);
+        } else {
+            entities = telemetryEventRepository.findByResourceIdAndTimestampBetweenOrderByTimestampAsc(
+                    resourceId, since, Instant.MAX);
+        }
+
+        return entities.stream()
+                .map(this::mapToResponse)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<TelemetryEventResponse> getTelemetryInWindow(UUID resourceId, String metricName, Instant start, Instant end) {
+        if (!resourceService.existsById(resourceId)) {
+            throw new ResourceNotFoundException("Resource with ID '" + resourceId + "' not found");
+        }
+        Instant windowStart = start != null ? start : Instant.EPOCH;
+        Instant windowEnd = end != null ? end : Instant.now();
+
+        List<TelemetryEventEntity> entities;
+        if (metricName != null && !metricName.isBlank()) {
+            entities = telemetryEventRepository.findByResourceIdAndMetricNameAndTimestampBetweenOrderByTimestampAsc(
+                    resourceId, metricName.trim(), windowStart, windowEnd);
+        } else {
+            entities = telemetryEventRepository.findByResourceIdAndTimestampBetweenOrderByTimestampAsc(
+                    resourceId, windowStart, windowEnd);
+        }
+
+        return entities.stream()
+                .map(this::mapToResponse)
+                .toList();
+    }
+
     private TelemetryEventResponse mapToResponse(TelemetryEventEntity entity) {
         Map<String, Object> metadata = Collections.emptyMap();
         if (entity.getMetadata() != null && !entity.getMetadata().isBlank()) {

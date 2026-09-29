@@ -83,6 +83,26 @@ class RecoveryServiceTest {
                 resourceService,
                 policyService
         );
+
+        com.aurora.platform.infrastructure.security.AuthenticatedOperator testOperator =
+                new com.aurora.platform.infrastructure.security.AuthenticatedOperator(
+                        "test-operator",
+                        "test-operator",
+                        "test@aurora.local",
+                        java.util.Set.of(
+                                com.aurora.platform.infrastructure.security.RecoveryCapability.RECOVERY_APPROVE,
+                                com.aurora.platform.infrastructure.security.RecoveryCapability.RECOVERY_APPROVE_PRODUCTION,
+                                com.aurora.platform.infrastructure.security.RecoveryCapability.RECOVERY_ADMIN
+                        )
+                );
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                new com.aurora.platform.infrastructure.security.OperatorAuthenticationToken(testOperator)
+        );
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void tearDown() {
+        org.springframework.security.core.context.SecurityContextHolder.clearContext();
     }
 
     @Test

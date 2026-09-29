@@ -1,9 +1,13 @@
 package com.aurora.platform.recovery.service;
 
 import com.aurora.platform.common.exception.ResourceNotFoundException;
+import com.aurora.platform.common.exception.ValidationException;
 import com.aurora.platform.incident.dto.IncidentResponse;
 import com.aurora.platform.incident.entity.IncidentSeverity;
 import com.aurora.platform.incident.service.IncidentService;
+import com.aurora.platform.infrastructure.security.AuthenticatedOperator;
+import com.aurora.platform.infrastructure.security.RecoveryCapability;
+import com.aurora.platform.infrastructure.security.SecurityUtils;
 import com.aurora.platform.intelligence.rca.dto.RcaAnalysisResponse;
 import com.aurora.platform.intelligence.rca.dto.RcaCandidateResponse;
 import com.aurora.platform.intelligence.rca.dto.RcaEvidenceResponse;
@@ -15,18 +19,23 @@ import com.aurora.platform.recovery.dto.CreateRecoveryActionRequest;
 import com.aurora.platform.recovery.dto.CreateRecoveryPlanRequest;
 import com.aurora.platform.recovery.dto.RecoveryActionResponse;
 import com.aurora.platform.recovery.dto.RecoveryPlanResponse;
+import com.aurora.platform.recovery.entity.OutboxEventStatus;
 import com.aurora.platform.recovery.entity.RecoveryActionEntity;
 import com.aurora.platform.recovery.entity.RecoveryActionStatus;
+import com.aurora.platform.recovery.entity.RecoveryOutboxEventEntity;
 import com.aurora.platform.recovery.entity.RecoveryPlanEntity;
 import com.aurora.platform.recovery.entity.RecoveryRisk;
 import com.aurora.platform.recovery.repository.RecoveryActionRepository;
+import com.aurora.platform.recovery.repository.RecoveryOutboxEventRepository;
 import com.aurora.platform.recovery.repository.RecoveryPlanRepository;
 import com.aurora.platform.resource.dto.ResourceResponse;
 import com.aurora.platform.resource.entity.ResourceType;
 import com.aurora.platform.resource.service.ResourceService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,7 +44,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -50,6 +61,8 @@ public class RecoveryServiceImpl implements RecoveryService {
     private final RcaAnalysisService rcaAnalysisService;
     private final ResourceService resourceService;
     private final PolicyService policyService;
+    private final RecoveryOutboxEventRepository outboxEventRepository;
+    private final ObjectMapper objectMapper;
     private Clock clock = Clock.systemUTC();
 
     public record AntiFlappingEvaluation(
@@ -75,20 +88,34 @@ public class RecoveryServiceImpl implements RecoveryService {
             IncidentService incidentService,
             @Autowired(required = false) RcaAnalysisService rcaAnalysisService,
             @Autowired(required = false) ResourceService resourceService,
-            @Autowired(required = false) PolicyService policyService) {
+            @Autowired(required = false) PolicyService policyService,
+            @Autowired(required = false) RecoveryOutboxEventRepository outboxEventRepository,
+            @Autowired(required = false) ObjectMapper objectMapper) {
         this.recoveryPlanRepository = recoveryPlanRepository;
         this.recoveryActionRepository = recoveryActionRepository;
         this.incidentService = incidentService;
         this.rcaAnalysisService = rcaAnalysisService;
         this.resourceService = resourceService;
         this.policyService = policyService;
+        this.outboxEventRepository = outboxEventRepository;
+        this.objectMapper = objectMapper != null ? objectMapper : new ObjectMapper();
+    }
+
+    public RecoveryServiceImpl(
+            RecoveryPlanRepository recoveryPlanRepository,
+            RecoveryActionRepository recoveryActionRepository,
+            IncidentService incidentService,
+            RcaAnalysisService rcaAnalysisService,
+            ResourceService resourceService,
+            PolicyService policyService) {
+        this(recoveryPlanRepository, recoveryActionRepository, incidentService, rcaAnalysisService, resourceService, policyService, null, null);
     }
 
     public RecoveryServiceImpl(
             RecoveryPlanRepository recoveryPlanRepository,
             RecoveryActionRepository recoveryActionRepository,
             IncidentService incidentService) {
-        this(recoveryPlanRepository, recoveryActionRepository, incidentService, null, null, null);
+        this(recoveryPlanRepository, recoveryActionRepository, incidentService, null, null, null, null, null);
     }
 
     @Override
@@ -159,16 +186,24 @@ public class RecoveryServiceImpl implements RecoveryService {
             risk = RecoveryRisk.CRITICAL;
             approvalRequired = true;
 
-            String targetName = incident.resourceId().toString();
-            if (resourceService != null) {
+            UUID targetResId = incident.resourceId();
+            ResourceResponse incResource = null;
+            if (resourceService != null && targetResId != null) {
                 try {
-                    ResourceResponse res = resourceService.getResourceById(incident.resourceId());
-                    targetName = res.name();
+                    incResource = resourceService.getResourceById(targetResId);
                 } catch (Exception ignored) {}
             }
 
+            String targetName = incResource != null ? incResource.name() : (targetResId != null ? targetResId.toString() : "unknown");
+            String env = incResource != null ? incResource.environment() : "production";
+            ResourceType rType = incResource != null ? incResource.type() : ResourceType.SERVICE;
+
             actionsToSave.add(RecoveryActionEntity.builder()
                     .actionType("MANUAL_INVESTIGATION")
+                    .targetResourceId(targetResId)
+                    .targetEnvironment(env)
+                    .targetResourceType(rType)
+                    .targetResourceName(targetName)
                     .target(targetName)
                     .status(RecoveryActionStatus.PENDING)
                     .result("Operator manual triage required; automated recovery withheld.")
@@ -183,83 +218,43 @@ public class RecoveryServiceImpl implements RecoveryService {
                 } catch (Exception ignored) {}
             }
 
-            String targetName = targetResource != null ? targetResource.name() : (targetResourceId != null ? targetResourceId.toString() : incident.resourceId().toString());
-            String metric = primaryCandidate.candidateMetric() != null ? primaryCandidate.candidateMetric().toLowerCase() : "";
-            ResourceType targetType = targetResource != null ? targetResource.type() : null;
-            if (targetType == null && resourceService != null && incident.resourceId() != null) {
+            if (targetResource == null && resourceService != null && incident.resourceId() != null) {
                 try {
-                    ResourceResponse incRes = resourceService.getResourceById(incident.resourceId());
-                    if (incRes != null) {
-                        targetType = incRes.type();
-                        if (targetResource == null) {
-                            targetResource = incRes;
-                        }
+                    targetResource = resourceService.getResourceById(incident.resourceId());
+                    if (targetResource != null) {
+                        targetResourceId = targetResource.id();
                     }
                 } catch (Exception ignored) {}
             }
 
+            if (targetResource == null && resourceService != null) {
+                throw new IllegalStateException("Cannot resolve canonical target resource " + targetResourceId + " for incident " + incidentId);
+            }
+
+            UUID finalTargetResourceId = targetResourceId != null ? targetResourceId : incident.resourceId();
+            String finalTargetEnvironment = targetResource != null ? targetResource.environment() : "production";
+            ResourceType finalTargetType = targetResource != null ? targetResource.type() : ResourceType.SERVICE;
+            String finalTargetName = targetResource != null ? targetResource.name() : (finalTargetResourceId != null ? finalTargetResourceId.toString() : "unknown");
+
+            String metric = primaryCandidate.candidateMetric() != null ? primaryCandidate.candidateMetric().toLowerCase() : "";
+
             List<RecoveryActionEntity> candidateActions = new ArrayList<>();
 
             // Deterministic action synthesis based on symptom/cause category
-            if (metric.contains("conn") || metric.contains("pool") || targetType == ResourceType.DATABASE) {
-                candidateActions.add(RecoveryActionEntity.builder()
-                        .actionType("FLUSH_CACHE")
-                        .target(targetName)
-                        .status(RecoveryActionStatus.PENDING)
-                        .result("Clear cache to reduce downstream query pressure")
-                        .build());
-                candidateActions.add(RecoveryActionEntity.builder()
-                        .actionType("RESTART_POOL")
-                        .target(targetName)
-                        .status(RecoveryActionStatus.PENDING)
-                        .result("Reset and replenish connection pool")
-                        .build());
+            if (metric.contains("conn") || metric.contains("pool") || finalTargetType == ResourceType.DATABASE) {
+                candidateActions.add(buildCandidateAction("FLUSH_CACHE", finalTargetResourceId, finalTargetEnvironment, finalTargetType, finalTargetName, "Clear cache to reduce downstream query pressure"));
+                candidateActions.add(buildCandidateAction("RESTART_POOL", finalTargetResourceId, finalTargetEnvironment, finalTargetType, finalTargetName, "Reset and replenish connection pool"));
             } else if (metric.contains("cpu") || metric.contains("thread")) {
-                candidateActions.add(RecoveryActionEntity.builder()
-                        .actionType("SCALE_OUT")
-                        .target(targetName)
-                        .status(RecoveryActionStatus.PENDING)
-                        .result("Increase replica count to relieve CPU/thread saturation")
-                        .build());
-                candidateActions.add(RecoveryActionEntity.builder()
-                        .actionType("RESTART_POD")
-                        .target(targetName)
-                        .status(RecoveryActionStatus.PENDING)
-                        .result("Gracefully restart worker pod to clear thread starvation")
-                        .build());
+                candidateActions.add(buildCandidateAction("SCALE_OUT", finalTargetResourceId, finalTargetEnvironment, finalTargetType, finalTargetName, "Increase replica count to relieve CPU/thread saturation"));
+                candidateActions.add(buildCandidateAction("RESTART_POD", finalTargetResourceId, finalTargetEnvironment, finalTargetType, finalTargetName, "Gracefully restart worker pod to clear thread starvation"));
             } else if (metric.contains("mem") || metric.contains("heap") || metric.contains("leak")) {
-                candidateActions.add(RecoveryActionEntity.builder()
-                        .actionType("RESTART_POD")
-                        .target(targetName)
-                        .status(RecoveryActionStatus.PENDING)
-                        .result("Restart container to reclaim leaked heap memory")
-                        .build());
-                candidateActions.add(RecoveryActionEntity.builder()
-                        .actionType("ROLLBACK")
-                        .target(targetName)
-                        .status(RecoveryActionStatus.PENDING)
-                        .result("Rollback to prior stable version if memory exhaustion recurs")
-                        .build());
+                candidateActions.add(buildCandidateAction("RESTART_POD", finalTargetResourceId, finalTargetEnvironment, finalTargetType, finalTargetName, "Restart container to reclaim leaked heap memory"));
+                candidateActions.add(buildCandidateAction("ROLLBACK", finalTargetResourceId, finalTargetEnvironment, finalTargetType, finalTargetName, "Rollback to prior stable version if memory exhaustion recurs"));
             } else if (metric.contains("error") || metric.contains("latency") || metric.contains("timeout")) {
-                candidateActions.add(RecoveryActionEntity.builder()
-                        .actionType("CIRCUIT_BREAKER_ENABLE")
-                        .target(targetName)
-                        .status(RecoveryActionStatus.PENDING)
-                        .result("Trip circuit breaker to halt cascading failure propagation")
-                        .build());
-                candidateActions.add(RecoveryActionEntity.builder()
-                        .actionType("RESTART_POD")
-                        .target(targetName)
-                        .status(RecoveryActionStatus.PENDING)
-                        .result("Restart degraded instance after shedding traffic")
-                        .build());
+                candidateActions.add(buildCandidateAction("CIRCUIT_BREAKER_ENABLE", finalTargetResourceId, finalTargetEnvironment, finalTargetType, finalTargetName, "Trip circuit breaker to halt cascading failure propagation"));
+                candidateActions.add(buildCandidateAction("RESTART_POD", finalTargetResourceId, finalTargetEnvironment, finalTargetType, finalTargetName, "Restart degraded instance after shedding traffic"));
             } else {
-                candidateActions.add(RecoveryActionEntity.builder()
-                        .actionType("RESTART_POD")
-                        .target(targetName)
-                        .status(RecoveryActionStatus.PENDING)
-                        .result("Graceful restart of degraded component")
-                        .build());
+                candidateActions.add(buildCandidateAction("RESTART_POD", finalTargetResourceId, finalTargetEnvironment, finalTargetType, finalTargetName, "Graceful restart of degraded component"));
             }
 
             Instant now = clock.instant();
@@ -269,24 +264,31 @@ public class RecoveryServiceImpl implements RecoveryService {
             List<String> policyBlockReasons = new ArrayList<>();
 
             List<PolicyResponse> activePolicies = Collections.emptyList();
-            if (policyService != null && targetType != null) {
+            if (policyService != null && finalTargetType != null) {
                 try {
-                    activePolicies = policyService.getActivePolicies(targetType);
+                    activePolicies = policyService.getActivePolicies(finalTargetType);
                 } catch (Exception ex) {
-                    log.warn("Failed to load active policies for resource type {}: {}", targetType, ex.getMessage());
+                    log.warn("Failed to load active policies for resource type {}: {}", finalTargetType, ex.getMessage());
                 }
             }
 
             for (RecoveryActionEntity cand : candidateActions) {
                 String actType = cand.getActionType();
 
-                // 1. Anti-flapping cooldown check (Part B)
-                AntiFlappingEvaluation cooldownEval = evaluateAntiFlapping(cand.getTarget(), actType, now);
+                // 1. Anti-flapping cooldown check (scoped to canonical target_resource_id)
+                AntiFlappingEvaluation cooldownEval = cand.getTargetResourceId() != null
+                        ? evaluateAntiFlapping(cand.getTargetResourceId(), actType, now)
+                        : evaluateAntiFlapping(cand.getTarget(), actType, now);
+
                 if (cooldownEval.inCooldown()) {
                     hasCooldownSuppression = true;
                     cooldownReasons.add(cooldownEval.suppressionReason());
                     actionsToSave.add(RecoveryActionEntity.builder()
                             .actionType("MANUAL_INVESTIGATION")
+                            .targetResourceId(cand.getTargetResourceId())
+                            .targetEnvironment(cand.getTargetEnvironment())
+                            .targetResourceType(cand.getTargetResourceType())
+                            .targetResourceName(cand.getTargetResourceName())
                             .target(cand.getTarget())
                             .status(RecoveryActionStatus.PENDING)
                             .result(cooldownEval.suppressionReason())
@@ -294,12 +296,12 @@ public class RecoveryServiceImpl implements RecoveryService {
                     continue;
                 }
 
-                // 2. Pre-flight policy evaluation (Part A)
+                // 2. Pre-flight policy evaluation
                 Double observedValue = resolveCandidateObservedValue(primaryCandidate, metric);
                 PolicyPreFlightEvaluation policyEval = evaluatePolicyPreFlight(
                         activePolicies,
-                        targetType,
-                        cand.getTarget(),
+                        finalTargetType,
+                        cand.getTargetResourceName(),
                         actType,
                         metric,
                         observedValue
@@ -310,6 +312,10 @@ public class RecoveryServiceImpl implements RecoveryService {
                     policyBlockReasons.add(policyEval.blockReason());
                     actionsToSave.add(RecoveryActionEntity.builder()
                             .actionType("MANUAL_INVESTIGATION")
+                            .targetResourceId(cand.getTargetResourceId())
+                            .targetEnvironment(cand.getTargetEnvironment())
+                            .targetResourceType(cand.getTargetResourceType())
+                            .targetResourceName(cand.getTargetResourceName())
                             .target(cand.getTarget())
                             .status(RecoveryActionStatus.PENDING)
                             .result(policyEval.blockReason())
@@ -321,13 +327,12 @@ public class RecoveryServiceImpl implements RecoveryService {
                 actionsToSave.add(cand);
             }
 
-
             // Deterministic operational risk evaluation
-            if (targetType == ResourceType.DATABASE) {
+            if (finalTargetType == ResourceType.DATABASE) {
                 risk = RecoveryRisk.HIGH;
             } else if (incident.severity() == IncidentSeverity.CRITICAL) {
                 risk = RecoveryRisk.HIGH;
-            } else if (targetType == ResourceType.POD || targetType == ResourceType.CONTAINER) {
+            } else if (finalTargetType == ResourceType.POD || finalTargetType == ResourceType.CONTAINER) {
                 risk = RecoveryRisk.LOW;
             } else {
                 risk = RecoveryRisk.MEDIUM;
@@ -339,8 +344,7 @@ public class RecoveryServiceImpl implements RecoveryService {
             }
 
             // ADR-005 Safety Policy Enforcement:
-            // Production environments, High/Critical risk actions, Cooldown, or Policy blocks strictly require human approval
-            boolean isProduction = targetResource != null && "production".equalsIgnoreCase(targetResource.environment());
+            boolean isProduction = "production".equalsIgnoreCase(finalTargetEnvironment);
             approvalRequired = isProduction || risk == RecoveryRisk.HIGH || risk == RecoveryRisk.CRITICAL || hasCooldownSuppression || hasPolicyBlock;
 
             StringBuilder reasoningBuilder = new StringBuilder(String.format(
@@ -349,7 +353,7 @@ public class RecoveryServiceImpl implements RecoveryService {
                             "Operational risk evaluated as %s.",
                     rcaAnalysis.id(),
                     primaryCandidate.candidateCause(),
-                    targetName,
+                    finalTargetName,
                     rcaAnalysis.confidenceLevel(),
                     confidence,
                     risk
@@ -393,6 +397,25 @@ public class RecoveryServiceImpl implements RecoveryService {
         return mapToResponse(savedPlan, persistedActions);
     }
 
+    private RecoveryActionEntity buildCandidateAction(
+            String actionType,
+            UUID targetResourceId,
+            String targetEnvironment,
+            ResourceType targetResourceType,
+            String targetResourceName,
+            String result) {
+        return RecoveryActionEntity.builder()
+                .actionType(actionType)
+                .targetResourceId(targetResourceId)
+                .targetEnvironment(targetEnvironment)
+                .targetResourceType(targetResourceType)
+                .targetResourceName(targetResourceName)
+                .target(targetResourceName)
+                .status(RecoveryActionStatus.PENDING)
+                .result(result)
+                .build();
+    }
+
     @Override
     @Transactional
     public RecoveryActionResponse approveRecoveryAction(UUID incidentId, UUID actionId) {
@@ -421,17 +444,34 @@ public class RecoveryServiceImpl implements RecoveryService {
             throw new IllegalStateException("Cannot approve recovery action in status: " + action.getStatus());
         }
 
-        // Defense-in-depth safety guardrail: verify action is not in cooldown before approval
-        AntiFlappingEvaluation cooldownEval = evaluateAntiFlapping(action.getTarget(), action.getActionType(), clock.instant());
+        // 1. Authenticated Operator Verification (S1 & S8)
+        AuthenticatedOperator operator = SecurityUtils.getCurrentOperator()
+                .orElseThrow(() -> new AccessDeniedException("Unauthenticated access denied: an authenticated operator principal is required for approval"));
+
+        boolean isProduction = "production".equalsIgnoreCase(action.getTargetEnvironment());
+        if (isProduction) {
+            if (!operator.hasCapability(RecoveryCapability.RECOVERY_APPROVE_PRODUCTION) && !operator.isAdmin()) {
+                throw new AccessDeniedException("Production recovery approval denied: operator lacks RECOVERY_APPROVE_PRODUCTION capability");
+            }
+        } else {
+            if (!operator.canApprove()) {
+                throw new AccessDeniedException("Recovery approval denied: operator lacks RECOVERY_APPROVE capability");
+            }
+        }
+
+        // 2. Defense-in-depth safety guardrail: verify action is not in cooldown before approval (S5)
+        AntiFlappingEvaluation cooldownEval = action.getTargetResourceId() != null
+                ? evaluateAntiFlapping(action.getTargetResourceId(), action.getActionType(), clock.instant())
+                : evaluateAntiFlapping(action.getTarget(), action.getActionType(), clock.instant());
         if (cooldownEval.inCooldown()) {
             throw new IllegalStateException("Cannot approve recovery action: target '" + action.getTarget() +
                     "' is in anti-flapping cooldown for action '" + action.getActionType() + "'");
         }
 
-        // Defense-in-depth safety guardrail: verify active policy allows this action before approval
+        // 3. Defense-in-depth safety guardrail: verify active policy allows this action before approval (S4)
         if (policyService != null && !"MANUAL_INVESTIGATION".equalsIgnoreCase(action.getActionType())) {
             try {
-                ResourceType targetType = null;
+                ResourceType targetType = action.getTargetResourceType();
                 String metricName = "*";
                 Double observedValue = null;
 
@@ -448,7 +488,7 @@ public class RecoveryServiceImpl implements RecoveryService {
                                     metricName = cand.candidateMetric();
                                 }
                                 observedValue = resolveCandidateObservedValue(cand, metricName);
-                                if (resourceService != null && cand.candidateResourceId() != null) {
+                                if (targetType == null && resourceService != null && cand.candidateResourceId() != null) {
                                     try {
                                         ResourceResponse cr = resourceService.getResourceById(cand.candidateResourceId());
                                         if (cr != null) {
@@ -474,7 +514,8 @@ public class RecoveryServiceImpl implements RecoveryService {
                 }
 
                 if (targetType != null) {
-                    PolicyPreFlightEvaluation policyEval = evaluatePolicyPreFlight(targetType, action.getTarget(), action.getActionType(), metricName, observedValue);
+                    String targetName = action.getTargetResourceName() != null ? action.getTargetResourceName() : action.getTarget();
+                    PolicyPreFlightEvaluation policyEval = evaluatePolicyPreFlight(targetType, targetName, action.getActionType(), metricName, observedValue);
                     if (!policyEval.allowed()) {
                         throw new IllegalStateException("Cannot approve recovery action: " + policyEval.blockReason());
                     }
@@ -484,14 +525,62 @@ public class RecoveryServiceImpl implements RecoveryService {
             } catch (Exception ignored) {}
         }
 
+        // 4. Update action with auditable operator identity
+        String capabilityUsed = isProduction
+                ? (operator.hasCapability(RecoveryCapability.RECOVERY_APPROVE_PRODUCTION) ? RecoveryCapability.RECOVERY_APPROVE_PRODUCTION.name() : RecoveryCapability.RECOVERY_ADMIN.name())
+                : (operator.hasCapability(RecoveryCapability.RECOVERY_APPROVE) ? RecoveryCapability.RECOVERY_APPROVE.name() : RecoveryCapability.RECOVERY_ADMIN.name());
+
+        action.setApprovedByUserId(operator.getUserId());
+        action.setApprovedByEmail(operator.getEmail());
+        action.setApprovedByCapability(capabilityUsed);
+        action.setApprovedAt(clock.instant());
+        String reason = "Approved by human operator for execution (" + operator.getUserId() + ")";
+        action.setApprovalReason(reason);
         action.setStatus(RecoveryActionStatus.APPROVED);
-        action.setResult("Approved by human operator for execution");
+        action.setResult(reason);
+
         RecoveryActionEntity updated = recoveryActionRepository.save(action);
 
-        log.info("Recovery action {} successfully APPROVED", actionId);
+        // 5. Transactional Outbox Event in the SAME commit (S9)
+        if (outboxEventRepository != null) {
+            String payload = buildOutboxPayload(updated);
+            RecoveryOutboxEventEntity outboxEvent = RecoveryOutboxEventEntity.builder()
+                    .aggregateType("RecoveryAction")
+                    .aggregateId(updated.getId())
+                    .eventType("RECOVERY_ACTION_APPROVED")
+                    .idempotencyKey("outbox-action-" + updated.getId() + "-v" + (updated.getVersion() != null ? updated.getVersion() : 0))
+                    .payload(payload)
+                    .status(OutboxEventStatus.PENDING)
+                    .retryCount(0)
+                    .createdAt(clock.instant())
+                    .build();
+            outboxEventRepository.save(outboxEvent);
+            log.info("Persisted transactional outbox event {} for recovery action {}", outboxEvent.getId(), updated.getId());
+        }
+
+        log.info("Recovery action {} successfully APPROVED by operator {}", actionId, operator.getUserId());
         return mapToActionResponse(updated);
     }
 
+    private String buildOutboxPayload(RecoveryActionEntity action) {
+        try {
+            Map<String, Object> map = new LinkedHashMap<>();
+            map.put("actionId", action.getId().toString());
+            map.put("planId", action.getRecoveryPlan() != null ? action.getRecoveryPlan().getId().toString() : null);
+            map.put("actionType", action.getActionType());
+            map.put("targetResourceId", action.getTargetResourceId() != null ? action.getTargetResourceId().toString() : null);
+            map.put("targetEnvironment", action.getTargetEnvironment());
+            map.put("targetResourceType", action.getTargetResourceType() != null ? action.getTargetResourceType().name() : null);
+            map.put("targetResourceName", action.getTargetResourceName());
+            map.put("approvedByUserId", action.getApprovedByUserId());
+            map.put("approvedAt", action.getApprovedAt() != null ? action.getApprovedAt().toString() : null);
+            map.put("timestamp", clock.instant().toString());
+            return objectMapper.writeValueAsString(map);
+        } catch (Exception e) {
+            log.error("Failed to serialize outbox event payload for action {}", action.getId(), e);
+            return "{\"actionId\":\"" + action.getId() + "\"}";
+        }
+    }
 
     @Override
     @Transactional
@@ -500,6 +589,13 @@ public class RecoveryServiceImpl implements RecoveryService {
 
         if (!incidentService.existsById(request.incidentId())) {
             throw new ResourceNotFoundException("Incident with ID '" + request.incidentId() + "' not found");
+        }
+
+        IncidentResponse incident = null;
+        if (incidentService != null) {
+            try {
+                incident = incidentService.getIncidentById(request.incidentId());
+            } catch (Exception ignored) {}
         }
 
         RecoveryPlanEntity plan = RecoveryPlanEntity.builder()
@@ -514,10 +610,21 @@ public class RecoveryServiceImpl implements RecoveryService {
 
         if (request.actions() != null && !request.actions().isEmpty()) {
             for (CreateRecoveryActionRequest actReq : request.actions()) {
+                ResourceResponse resolvedRes = resolveTargetResource(actReq.target(), incident);
+
+                UUID targetResId = resolvedRes != null ? resolvedRes.id() : (incident != null && incident.resourceId() != null ? incident.resourceId() : UUID.randomUUID());
+                String targetEnv = resolvedRes != null ? resolvedRes.environment() : "production";
+                ResourceType targetType = resolvedRes != null ? resolvedRes.type() : ResourceType.SERVICE;
+                String targetName = resolvedRes != null ? resolvedRes.name() : (actReq.target() != null ? actReq.target() : "unknown");
+
                 RecoveryActionEntity actEntity = RecoveryActionEntity.builder()
                         .recoveryPlan(savedPlan)
                         .actionType(actReq.actionType())
-                        .target(actReq.target())
+                        .targetResourceId(targetResId)
+                        .targetEnvironment(targetEnv)
+                        .targetResourceType(targetType)
+                        .targetResourceName(targetName)
+                        .target(targetName)
                         .status(actReq.status() != null ? actReq.status() : RecoveryActionStatus.PENDING)
                         .result(actReq.result())
                         .build();
@@ -543,6 +650,13 @@ public class RecoveryServiceImpl implements RecoveryService {
             throw new ResourceNotFoundException("Incident with ID '" + incidentId + "' not found");
         }
 
+        IncidentResponse incident = null;
+        if (incidentService != null) {
+            try {
+                incident = incidentService.getIncidentById(incidentId);
+            } catch (Exception ignored) {}
+        }
+
         RecoveryPlanEntity plan = RecoveryPlanEntity.builder()
                 .incidentId(incidentId)
                 .reasoning(reasoning)
@@ -556,12 +670,63 @@ public class RecoveryServiceImpl implements RecoveryService {
         if (actions != null && !actions.isEmpty()) {
             for (RecoveryActionEntity action : actions) {
                 action.setRecoveryPlan(savedPlan);
+                if (action.getTargetResourceId() == null) {
+                    ResourceResponse resolvedRes = resolveTargetResource(action.getTarget(), incident);
+                    if (resolvedRes != null) {
+                        action.setTargetResourceId(resolvedRes.id());
+                        action.setTargetEnvironment(resolvedRes.environment());
+                        action.setTargetResourceType(resolvedRes.type());
+                        action.setTargetResourceName(resolvedRes.name());
+                        if (action.getTarget() == null) {
+                            action.setTarget(resolvedRes.name());
+                        }
+                    } else if (incident != null && incident.resourceId() != null) {
+                        action.setTargetResourceId(incident.resourceId());
+                        action.setTargetEnvironment("production");
+                        action.setTargetResourceType(ResourceType.SERVICE);
+                        action.setTargetResourceName(action.getTarget() != null ? action.getTarget() : "unknown");
+                    } else {
+                        action.setTargetResourceId(UUID.randomUUID());
+                        action.setTargetEnvironment("production");
+                        action.setTargetResourceType(ResourceType.SERVICE);
+                        action.setTargetResourceName(action.getTarget() != null ? action.getTarget() : "unknown");
+                    }
+                }
                 recoveryActionRepository.save(action);
             }
         }
 
         List<RecoveryActionEntity> savedActions = recoveryActionRepository.findByRecoveryPlanId(savedPlan.getId());
         return mapToResponse(savedPlan, savedActions);
+    }
+
+    private ResourceResponse resolveTargetResource(String targetIdentifier, IncidentResponse incident) {
+        if (resourceService == null) {
+            return null;
+        }
+        if (targetIdentifier != null) {
+            try {
+                UUID parsedUuid = UUID.fromString(targetIdentifier);
+                return resourceService.getResourceById(parsedUuid);
+            } catch (Exception ignored) {}
+
+            try {
+                List<ResourceResponse> all = resourceService.getAllResources(null, null, null);
+                if (all != null) {
+                    for (ResourceResponse r : all) {
+                        if (targetIdentifier.equalsIgnoreCase(r.name())) {
+                            return r;
+                        }
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+        if (incident != null && incident.resourceId() != null) {
+            try {
+                return resourceService.getResourceById(incident.resourceId());
+            } catch (Exception ignored) {}
+        }
+        return null;
     }
 
     private RecoveryPlanResponse mapToResponse(RecoveryPlanEntity plan, List<RecoveryActionEntity> actions) {
@@ -590,8 +755,30 @@ public class RecoveryServiceImpl implements RecoveryService {
                 a.getStatus(),
                 a.getResult(),
                 a.getStartedAt(),
-                a.getCompletedAt()
+                a.getCompletedAt(),
+                a.getTargetResourceId(),
+                a.getTargetEnvironment(),
+                a.getTargetResourceType(),
+                a.getTargetResourceName(),
+                a.getApprovedByUserId(),
+                a.getApprovedByEmail(),
+                a.getApprovedByCapability(),
+                a.getApprovedAt(),
+                a.getApprovalReason()
         );
+    }
+
+    public AntiFlappingEvaluation evaluateAntiFlapping(UUID targetResourceId, String actionType, Instant now) {
+        if (recoveryActionRepository == null || targetResourceId == null || actionType == null) {
+            return new AntiFlappingEvaluation(false, 0, null);
+        }
+
+        List<RecoveryActionEntity> history = recoveryActionRepository.findByTargetResourceIdAndActionType(targetResourceId, actionType);
+        if (history == null || history.isEmpty()) {
+            return new AntiFlappingEvaluation(false, 0, null);
+        }
+
+        return evaluateAntiFlappingFromHistory(history, targetResourceId.toString(), actionType, now);
     }
 
     public AntiFlappingEvaluation evaluateAntiFlapping(String target, String actionType, Instant now) {
@@ -604,11 +791,15 @@ public class RecoveryServiceImpl implements RecoveryService {
             return new AntiFlappingEvaluation(false, 0, null);
         }
 
+        return evaluateAntiFlappingFromHistory(history, target, actionType, now);
+    }
+
+    private AntiFlappingEvaluation evaluateAntiFlappingFromHistory(List<RecoveryActionEntity> history, String targetLabel, String actionType, Instant now) {
         Instant windowStart = now.minus(Duration.ofHours(1));
 
         // Find the latest successful recovery within the window, if any
         Instant latestSuccess = history.stream()
-                .filter(a -> a.getStatus() == RecoveryActionStatus.SUCCESS)
+                .filter(a -> a.getStatus() == RecoveryActionStatus.SUCCESS || a.getStatus() == RecoveryActionStatus.COMPLETED)
                 .map(this::resolveEffectiveTimestamp)
                 .filter(ts -> !ts.isBefore(windowStart) && !ts.isAfter(now))
                 .max(Instant::compareTo)
@@ -632,7 +823,7 @@ public class RecoveryServiceImpl implements RecoveryService {
         if (failureCount >= 2) {
             String reason = String.format(
                     "Suppressed by anti-flapping cooldown: %d failed recovery attempts recorded within the last 1 hour on target '%s' for action '%s'. Escalated to human SRE investigation.",
-                    failureCount, target, actionType
+                    failureCount, targetLabel, actionType
             );
             return new AntiFlappingEvaluation(true, failureCount, reason);
         }

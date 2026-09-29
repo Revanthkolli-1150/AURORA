@@ -178,7 +178,7 @@ class Phase5AExecutionLifecycleTest {
     }
 
     @Test
-    @DisplayName("S16 & S6: Duplicate Execution Prevention - Idempotent replay prevents multiple actuator calls")
+    @DisplayName("S16 & S6: Duplicate Execution Prevention - Idempotent replay prevents multiple actuator calls and preserves state")
     void duplicateExecutionPrevention() {
         RecoveryActionEntity action = createApprovedAction("staging");
         when(recoveryActionRepository.findById(actionId)).thenReturn(Optional.of(action));
@@ -200,7 +200,53 @@ class Phase5AExecutionLifecycleTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("S16 Violation: Execution attempt with idempotency key 'idemp-key-dup' already SUCCEEDED");
 
+        // Action status must NOT be mutated to FAILED upon replay
+        assertThat(action.getStatus()).isEqualTo(RecoveryActionStatus.APPROVED);
+        // Existing attempt must NOT be altered
+        assertThat(priorAttempt.getStatus()).isEqualTo(ExecutionAttemptStatus.SUCCEEDED);
         // Actuator was NEVER invoked
+        assertThat(sandboxActuator.getRecordedInvocations()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Finding 2: Replay of completed action preserves terminal state and prevents duplicate actuator execution")
+    void replayOfCompletedActionPreservesTerminalState() {
+        // Initial state: action previously completed successfully
+        RecoveryActionEntity completedAction = createApprovedAction("staging");
+        completedAction.setStatus(RecoveryActionStatus.COMPLETED);
+        completedAction.setResult("Action executed and verified successfully");
+        when(recoveryActionRepository.findById(actionId)).thenReturn(Optional.of(completedAction));
+
+        // Replay attempt must be rejected fail-closed by S3 terminal check
+        assertThatThrownBy(() -> orchestrator.executeAction(actionId, "replay-key-completed"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("S3 Violation: Cannot execute action in status 'COMPLETED'");
+
+        // Crucial invariant: RecoveryAction state remains COMPLETED (NOT mutated to FAILED)
+        assertThat(completedAction.getStatus()).isEqualTo(RecoveryActionStatus.COMPLETED);
+        assertThat(completedAction.getResult()).isEqualTo("Action executed and verified successfully");
+
+        // Actuator was NOT invoked
+        assertThat(sandboxActuator.getRecordedInvocations()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Genuine gate failure (non-replay) transitions action to FAILED")
+    void genuineGateFailureTransitionsToFailed() {
+        RecoveryActionEntity unapprovedAction = createApprovedAction("staging");
+        unapprovedAction.setApprovedByUserId(null); // S1 Violation: Missing authenticated operator
+        when(recoveryActionRepository.findById(actionId)).thenReturn(Optional.of(unapprovedAction));
+
+        assertThatThrownBy(() -> orchestrator.executeAction(actionId, "genuine-fail-key"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("S1 Violation: Missing authenticated operator approval record");
+
+        // Genuinely failed new execution transitions to FAILED
+        assertThat(unapprovedAction.getStatus()).isEqualTo(RecoveryActionStatus.FAILED);
+        assertThat(unapprovedAction.getResult()).contains("Execution blocked by authorization gate: S1 Violation");
+        verify(recoveryActionRepository).save(unapprovedAction);
+
+        // Actuator was never invoked
         assertThat(sandboxActuator.getRecordedInvocations()).isEmpty();
     }
 
@@ -246,15 +292,20 @@ class Phase5AExecutionLifecycleTest {
     }
 
     @Test
-    @DisplayName("S3: Invariant - Terminal FAILED action cannot be re-executed silently")
+    @DisplayName("S3: Invariant - Terminal FAILED action cannot be re-executed silently and preserves FAILED state")
     void terminalFailedActionCannotBeReExecuted() {
         RecoveryActionEntity failedAction = createApprovedAction("staging");
         failedAction.setStatus(RecoveryActionStatus.FAILED);
+        failedAction.setResult("Original failure reason");
         when(recoveryActionRepository.findById(actionId)).thenReturn(Optional.of(failedAction));
 
         assertThatThrownBy(() -> orchestrator.executeAction(actionId, "key-retry-terminal"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("S3 Violation: Cannot execute action in status 'FAILED'");
+
+        // Terminal state preserved, result not overwritten with gate message
+        assertThat(failedAction.getStatus()).isEqualTo(RecoveryActionStatus.FAILED);
+        assertThat(failedAction.getResult()).isEqualTo("Original failure reason");
 
         // Actuator was never invoked
         assertThat(sandboxActuator.getRecordedInvocations()).isEmpty();

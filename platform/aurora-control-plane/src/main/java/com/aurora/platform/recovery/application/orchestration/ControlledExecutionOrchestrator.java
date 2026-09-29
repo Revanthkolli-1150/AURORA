@@ -71,7 +71,7 @@ public class ControlledExecutionOrchestrator {
         GateEvaluationResult gateResult = authorizationGate.evaluate(actionId, idempotencyKey);
         if (!gateResult.allowed()) {
             log.warn("Execution authorization gate REJECTED action {}: {}", actionId, gateResult.rejectionReason());
-            if (gateResult.action() != null) {
+            if (gateResult.action() != null && !gateResult.isReplayOrTerminal()) {
                 RecoveryActionEntity act = gateResult.action();
                 act.setStatus(RecoveryActionStatus.FAILED);
                 act.setResult("Execution blocked by authorization gate: " + gateResult.rejectionReason());

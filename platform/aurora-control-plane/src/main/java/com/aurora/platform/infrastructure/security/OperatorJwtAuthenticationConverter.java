@@ -2,6 +2,7 @@ package com.aurora.platform.infrastructure.security;
 
 import org.springframework.core.convert.converter.Converter;
 import org.springframework.security.authentication.AbstractAuthenticationToken;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Component;
 
@@ -15,18 +16,24 @@ import java.util.Set;
  * Converts a standard OAuth2/OIDC JWT into an OperatorAuthenticationToken.
  * Extracts stable subject, username, email, and security capabilities without coupling
  * to any commercial identity provider schema.
+ * <p>
+ * Enforces fail-closed authentication: a valid, usable operator identity (sub or uid) is mandatory.
  */
 @Component
 public class OperatorJwtAuthenticationConverter implements Converter<Jwt, AbstractAuthenticationToken> {
 
     @Override
     public AbstractAuthenticationToken convert(Jwt jwt) {
+        if (jwt == null) {
+            throw new BadCredentialsException("Authentication failed: JWT token is null");
+        }
+
         String userId = jwt.getSubject();
         if (userId == null || userId.isBlank()) {
             userId = jwt.getClaimAsString("uid");
         }
         if (userId == null || userId.isBlank()) {
-            userId = "anonymous-operator";
+            throw new BadCredentialsException("Authentication failed: JWT lacks a valid operator identity (subject or uid claim is required)");
         }
 
         String username = jwt.getClaimAsString("preferred_username");

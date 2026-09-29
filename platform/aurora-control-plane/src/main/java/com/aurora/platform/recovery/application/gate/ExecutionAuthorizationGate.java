@@ -67,6 +67,9 @@ public class ExecutionAuthorizationGate {
 
         // S3: Execution Prerequisite - action must be APPROVED or IN_PROGRESS
         if (action.getStatus() != RecoveryActionStatus.APPROVED && action.getStatus() != RecoveryActionStatus.IN_PROGRESS) {
+            if (isTerminalOrNonExecutableStatus(action.getStatus())) {
+                return GateEvaluationResult.replayDenial("S3 Violation: Cannot execute action in status '" + action.getStatus() + "'", action);
+            }
             return GateEvaluationResult.deny("S3 Violation: Cannot execute action in status '" + action.getStatus() + "'", action);
         }
 
@@ -109,12 +112,12 @@ public class ExecutionAuthorizationGate {
             if (existingAttempt.isPresent()) {
                 ExecutionAttemptEntity attempt = existingAttempt.get();
                 if (attempt.getStatus() == ExecutionAttemptStatus.SUCCEEDED) {
-                    return GateEvaluationResult.deny("S16 Violation: Execution attempt with idempotency key '" + idempotencyKey + "' already SUCCEEDED", action);
+                    return GateEvaluationResult.replayDenial("S16 Violation: Execution attempt with idempotency key '" + idempotencyKey + "' already SUCCEEDED", action);
                 }
                 if (attempt.getStatus() == ExecutionAttemptStatus.EXECUTING) {
                     Instant now = clock.instant();
                     if (attempt.getLeaseExpiresAt() != null && attempt.getLeaseExpiresAt().isAfter(now)) {
-                        return GateEvaluationResult.deny("S16 Violation: Active lease exists for idempotency key '" + idempotencyKey + "'", action);
+                        return GateEvaluationResult.replayDenial("S16 Violation: Active lease exists for idempotency key '" + idempotencyKey + "'", action);
                     }
                 }
             }
@@ -146,5 +149,15 @@ public class ExecutionAuthorizationGate {
 
         log.info("Execution authorization gate PASSED for action {} on target {}", action.getId(), action.getTargetResourceName());
         return GateEvaluationResult.permit(action);
+    }
+
+    private boolean isTerminalOrNonExecutableStatus(RecoveryActionStatus status) {
+        return status == RecoveryActionStatus.COMPLETED
+                || status == RecoveryActionStatus.SUCCESS
+                || status == RecoveryActionStatus.FAILED
+                || status == RecoveryActionStatus.CANCELLED
+                || status == RecoveryActionStatus.REJECTED
+                || status == RecoveryActionStatus.SUPERSEDED
+                || status == RecoveryActionStatus.ROLLED_BACK;
     }
 }

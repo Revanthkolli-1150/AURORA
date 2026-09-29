@@ -18,11 +18,14 @@ import com.aurora.platform.recovery.repository.RecoveryPlanRepository;
 import com.aurora.platform.recovery.service.RecoveryServiceImpl;
 import com.aurora.platform.resource.entity.ResourceType;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.aurora.platform.infrastructure.security.OperatorJwtAuthenticationConverter;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -195,5 +198,126 @@ class Phase5ASecurityTest {
 
         assertThat(response.status()).isEqualTo(RecoveryActionStatus.APPROVED);
         assertThat(response.approvedByUserId()).isEqualTo("admin-ops-01");
+    }
+
+    @Nested
+    @DisplayName("OperatorJwtAuthenticationConverter: Fail-Closed Operator Identity Tests")
+    class OperatorJwtAuthenticationConverterTests {
+
+        private final OperatorJwtAuthenticationConverter converter = new OperatorJwtAuthenticationConverter();
+
+        @Test
+        @DisplayName("Valid JWT with subject succeeds and correctly populates operator identity")
+        void validJwtWithSubjectSucceeds() {
+            Jwt jwt = Jwt.withTokenValue("mock.jwt.token")
+                    .header("alg", "none")
+                    .claim("sub", "ops-user-42")
+                    .claim("preferred_username", "bob_operator")
+                    .claim("email", "bob@aurora.local")
+                    .claim("roles", java.util.List.of("RECOVERY_APPROVE"))
+                    .build();
+
+            org.springframework.security.authentication.AbstractAuthenticationToken token = converter.convert(jwt);
+            assertThat(token).isNotNull();
+            assertThat(token).isInstanceOf(OperatorAuthenticationToken.class);
+
+            OperatorAuthenticationToken opToken = (OperatorAuthenticationToken) token;
+            AuthenticatedOperator operator = (AuthenticatedOperator) opToken.getPrincipal();
+            assertThat(operator.getUserId()).isEqualTo("ops-user-42");
+            assertThat(operator.getUsername()).isEqualTo("bob_operator");
+            assertThat(operator.getEmail()).isEqualTo("bob@aurora.local");
+            assertThat(operator.getCapabilities()).contains(RecoveryCapability.RECOVERY_APPROVE);
+        }
+
+        @Test
+        @DisplayName("Valid JWT with uid fallback succeeds when sub is absent")
+        void validJwtWithUidSucceeds() {
+            Jwt jwt = Jwt.withTokenValue("mock.jwt.token")
+                    .header("alg", "none")
+                    .claim("uid", "uid-operator-99")
+                    .claim("name", "Operator NinetyNine")
+                    .claim("capabilities", java.util.List.of("RECOVERY_VIEW"))
+                    .build();
+
+            org.springframework.security.authentication.AbstractAuthenticationToken token = converter.convert(jwt);
+            assertThat(token).isNotNull();
+
+            OperatorAuthenticationToken opToken = (OperatorAuthenticationToken) token;
+            AuthenticatedOperator operator = (AuthenticatedOperator) opToken.getPrincipal();
+            assertThat(operator.getUserId()).isEqualTo("uid-operator-99");
+            assertThat(operator.getUsername()).isEqualTo("Operator NinetyNine");
+            assertThat(operator.getCapabilities()).contains(RecoveryCapability.RECOVERY_VIEW);
+        }
+
+        @Test
+        @DisplayName("JWT with no usable operator identity (missing sub and uid) fails closed")
+        void jwtWithoutIdentityFailsClosed() {
+            Jwt jwt = Jwt.withTokenValue("mock.jwt.token")
+                    .header("alg", "none")
+                    .claim("email", "ghost@aurora.local")
+                    .claim("roles", java.util.List.of("RECOVERY_APPROVE"))
+                    .build();
+
+            assertThatThrownBy(() -> converter.convert(jwt))
+                    .isInstanceOf(org.springframework.security.authentication.BadCredentialsException.class)
+                    .hasMessageContaining("JWT lacks a valid operator identity");
+        }
+
+        @Test
+        @DisplayName("JWT with empty or blank/whitespace identity fails closed")
+        void jwtWithBlankIdentityFailsClosed() {
+            Jwt jwtWithBlankSub = Jwt.withTokenValue("mock.jwt.token")
+                    .header("alg", "none")
+                    .claim("sub", "   ")
+                    .build();
+
+            assertThatThrownBy(() -> converter.convert(jwtWithBlankSub))
+                    .isInstanceOf(org.springframework.security.authentication.BadCredentialsException.class)
+                    .hasMessageContaining("JWT lacks a valid operator identity");
+
+            Jwt jwtWithBlankUid = Jwt.withTokenValue("mock.jwt.token")
+                    .header("alg", "none")
+                    .claim("uid", "")
+                    .build();
+
+            assertThatThrownBy(() -> converter.convert(jwtWithBlankUid))
+                    .isInstanceOf(org.springframework.security.authentication.BadCredentialsException.class)
+                    .hasMessageContaining("JWT lacks a valid operator identity");
+        }
+
+        @Test
+        @DisplayName("No anonymous or synthetic fallback identity is ever produced")
+        void noAnonymousFallbackIdentityProduced() {
+            Jwt emptyJwt = Jwt.withTokenValue("mock.jwt.token")
+                    .header("alg", "none")
+                    .claim("preferred_username", "anonymous-user")
+                    .build();
+
+            assertThatThrownBy(() -> converter.convert(emptyJwt))
+                    .isInstanceOf(org.springframework.security.authentication.BadCredentialsException.class);
+        }
+
+        @Test
+        @DisplayName("Capability extraction handles scopes, authorities, and realm_access roles")
+        void capabilityExtractionRemainsIntact() {
+            Jwt jwt = Jwt.withTokenValue("mock.jwt.token")
+                    .header("alg", "none")
+                    .claim("sub", "admin-user")
+                    .claim("scope", "RECOVERY_ADMIN RECOVERY_APPROVE_PRODUCTION")
+                    .claim("authorities", java.util.List.of("RECOVERY_APPROVE"))
+                    .claim("realm_access", java.util.Map.of("roles", java.util.List.of("RECOVERY_VIEW")))
+                    .build();
+
+            org.springframework.security.authentication.AbstractAuthenticationToken token = converter.convert(jwt);
+            OperatorAuthenticationToken opToken = (OperatorAuthenticationToken) token;
+            AuthenticatedOperator operator = (AuthenticatedOperator) opToken.getPrincipal();
+
+            assertThat(operator.getCapabilities()).containsExactlyInAnyOrder(
+                    RecoveryCapability.RECOVERY_ADMIN,
+                    RecoveryCapability.RECOVERY_APPROVE_PRODUCTION,
+                    RecoveryCapability.RECOVERY_APPROVE,
+                    RecoveryCapability.RECOVERY_VIEW
+            );
+        }
     }
 }
